@@ -1,4 +1,4 @@
-# Bitbucket/Stash Pull Request Coverage Status Plugin for Jenkins
+# Bitbucket Cloud Pull Request Coverage Status Plugin for Jenkins
 
 [![Build Status](https://travis-ci.org/adiesner/bitbucket-pr-coverage-status-plugin.svg?branch=master)](https://travis-ci.org/adiesner/bitbucket-pr-coverage-status-plugin) [![codecov](https://codecov.io/gh/adiesner/bitbucket-pr-coverage-status-plugin/branch/master/graph/badge.svg)](https://codecov.io/gh/adiesner/bitbucket-pr-coverage-status-plugin)
 

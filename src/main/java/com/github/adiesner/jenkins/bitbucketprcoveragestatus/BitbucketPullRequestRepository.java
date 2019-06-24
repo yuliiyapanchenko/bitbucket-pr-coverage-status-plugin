@@ -18,7 +18,7 @@ limitations under the License.
 package com.github.adiesner.jenkins.bitbucketprcoveragestatus;
 
 import com.github.adiesner.jenkins.bitbucketprcoveragestatus.bitbucket.ApiClient;
-import com.github.adiesner.jenkins.bitbucketprcoveragestatus.bitbucket.Pullrequest;
+import com.github.adiesner.jenkins.bitbucketprcoveragestatus.bitbucket.CloudPullrequest;
 import org.apache.commons.lang.StringUtils;
 
 import java.io.IOException;
@@ -34,8 +34,8 @@ public class BitbucketPullRequestRepository implements BitbucketApi {
 
     @Override
     public PullRequest getPullRequestForId(String branch, String sha) throws IOException {
-        final List<Pullrequest> pullRequests = bitbucketApiClient.getPullRequests();
-        for (Pullrequest pullRequest : pullRequests) {
+        final List<CloudPullrequest> pullRequests = bitbucketApiClient.getPullRequests();
+        for (CloudPullrequest pullRequest : pullRequests) {
             if ((StringUtils.equals(pullRequest.getSource().getBranch().getName(), branch)) &&
                     ((StringUtils.equals(pullRequest.getSource().getCommit().getHash(), sha)))) {
                 return new PullRequest(pullRequest.getId(), pullRequest.getTitle());
@@ -45,8 +45,8 @@ public class BitbucketPullRequestRepository implements BitbucketApi {
     }
 
     @Override
-    public void comment(final String prId, final String message) throws IOException {
-        List<Pullrequest.Comment> ownComments = bitbucketApiClient.findOwnPullRequestComments(prId);
+    public void comment(final String prId, final String message) {
+        List<CloudPullrequest.Comment> ownComments = bitbucketApiClient.findOwnPullRequestComments(prId);
         bitbucketApiClient.deletePreviousGlobalComments(prId, ownComments);
         bitbucketApiClient.postPullRequestComment(prId, message);
     }

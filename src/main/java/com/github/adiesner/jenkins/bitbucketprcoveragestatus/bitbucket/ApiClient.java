@@ -2,30 +2,24 @@ package com.github.adiesner.jenkins.bitbucketprcoveragestatus.bitbucket;
 
 import hudson.ProxyConfiguration;
 import jenkins.model.Jenkins;
-import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.httpclient.Credentials;
 import org.apache.commons.httpclient.HttpClient;
-import org.apache.commons.httpclient.HttpException;
 import org.apache.commons.httpclient.HttpMethodBase;
-import org.apache.commons.httpclient.NameValuePair;
 import org.apache.commons.httpclient.UsernamePasswordCredentials;
 import org.apache.commons.httpclient.auth.AuthScope;
 import org.apache.commons.httpclient.methods.DeleteMethod;
 import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.commons.httpclient.methods.PostMethod;
-import org.apache.commons.httpclient.methods.PutMethod;
+import org.apache.commons.httpclient.methods.StringRequestEntity;
 import org.apache.commons.httpclient.params.HttpClientParams;
-import org.apache.commons.httpclient.util.EncodingUtil;
 import org.apache.commons.lang.StringUtils;
 import org.codehaus.jackson.map.ObjectMapper;
+import org.codehaus.jackson.map.annotate.JsonSerialize;
 import org.codehaus.jackson.map.type.TypeFactory;
 import org.codehaus.jackson.type.JavaType;
 import org.codehaus.jackson.type.TypeReference;
 
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -41,38 +35,33 @@ import static java.util.stream.Collectors.toList;
  */
 public class ApiClient {
     private static final Logger logger = Logger.getLogger(ApiClient.class.getName());
-    private static final String V1_API_BASE_URL = "https://bitbucket.org/api/1.0/repositories/";
     private static final String V2_API_BASE_URL = "https://bitbucket.org/api/2.0/repositories/";
     private static final String V2_API_URL = "https://api.bitbucket.org/2.0";
-    private static final String COMPUTED_KEY_FORMAT = "%s-%s";
     private String owner;
     private String repositoryName;
     private Credentials credentials;
-    private String key;
     private String name;
     private HttpClientFactory factory;
     private String userUuid;
 
-    public static final byte MAX_KEY_SIZE_BB_API = 40;
-
-    public static class HttpClientFactory {
-        public static final HttpClientFactory INSTANCE = new HttpClientFactory();
+    static class HttpClientFactory {
+        static final HttpClientFactory INSTANCE = new HttpClientFactory();
         private static final int DEFAULT_TIMEOUT = 60000;
 
-        public HttpClient getInstanceHttpClient() {
+        HttpClient getInstanceHttpClient() {
             HttpClient client = new HttpClient();
 
             HttpClientParams params = client.getParams();
             params.setConnectionManagerTimeout(DEFAULT_TIMEOUT);
             params.setSoTimeout(DEFAULT_TIMEOUT);
 
-            if(getInstance() == null){
+            if (getInstance() == null) {
                 return client;
             }
             ProxyConfiguration proxy = getInstance().proxy;
             if (proxy == null) return client;
 
-            logger.log(Level.FINE, "Jenkins proxy: {0}:{1}", new Object[]{ proxy.name, proxy.port });
+            logger.log(Level.FINE, "Jenkins proxy: {0}:{1}", new Object[]{proxy.name, proxy.port});
             client.getHostConfiguration().setProxy(proxy.name, proxy.port);
             String username = proxy.getUserName();
             String password = proxy.getPassword();
@@ -101,22 +90,21 @@ public class ApiClient {
         this.credentials = new UsernamePasswordCredentials(username, password);
         this.owner = owner;
         this.repositoryName = repositoryName;
-        this.key = key;
         this.name = name;
         this.factory = httpFactory != null ? httpFactory : HttpClientFactory.INSTANCE;
         this.userUuid = getLoggedInUserUUID();
     }
 
-    public List<Pullrequest> getPullRequests() {
-        return getAllValues(v2("/pullrequests/"), 50, Pullrequest.class);
+    public List<CloudPullrequest> getPullRequests() {
+        return getAllValues(v2("/pullrequests/"), 50, CloudPullrequest.class);
     }
 
-    public List<Pullrequest.Comment> getPullRequestComments(String pullRequestId) {
-        return getAllValues(v2("/pullrequests/" + pullRequestId + "/comments"), 100, Pullrequest.Comment.class);
+    private List<CloudPullrequest.Comment> getPullRequestComments(String pullRequestId) {
+        return getAllValues(v2("/pullrequests/" + pullRequestId + "/comments"), 100, CloudPullrequest.Comment.class);
     }
 
-    public List<Pullrequest.Comment> findOwnPullRequestComments(String pullRequestId){
-        List<Pullrequest.Comment> pullRequestComments = getPullRequestComments(pullRequestId);
+    public List<CloudPullrequest.Comment> findOwnPullRequestComments(String pullRequestId) {
+        List<CloudPullrequest.Comment> pullRequestComments = getPullRequestComments(pullRequestId);
         return pullRequestComments.stream()
                 .filter(comment -> nonNull(comment.getAuthor()))
                 .filter(comment -> comment.getAuthor().getUuid().equalsIgnoreCase(userUuid))
@@ -124,7 +112,7 @@ public class ApiClient {
     }
 
     // global comments do not have a file path (and inline object), and file-level comments do not require a line number
-    public void deletePreviousGlobalComments(String pullRequestId, List<Pullrequest.Comment> ownComments){
+    public void deletePreviousGlobalComments(String pullRequestId, List<CloudPullrequest.Comment> ownComments) {
         ownComments.stream()
                 .filter(comment -> isNull(comment.getInline()))
                 .filter(comment -> comment.getContent().contains(SHIELDS_BADGE_COVERAGE_URL))
@@ -135,83 +123,15 @@ public class ApiClient {
         return this.name;
     }
 
-    private static MessageDigest SHA1 = null;
-
-    /**
-     * Retrun
-     * @param keyExPart
-     * @return key parameter for call BitBucket API
-     */
-    private String computeAPIKey(String keyExPart) {
-        String computedKey = String.format(COMPUTED_KEY_FORMAT, this.key, keyExPart);
-
-        if (computedKey.length() > MAX_KEY_SIZE_BB_API) {
-            try {
-                if (SHA1 == null) SHA1 = MessageDigest.getInstance("SHA1");
-                return new String(Hex.encodeHex(SHA1.digest(computedKey.getBytes("UTF-8"))));
-            } catch(NoSuchAlgorithmException e) {
-                logger.log(Level.WARNING, "Failed to create hash provider", e);
-            } catch (UnsupportedEncodingException e) {
-                logger.log(Level.WARNING, "Failed to create hash provider", e);
-            }
-        }
-        return (computedKey.length() <= MAX_KEY_SIZE_BB_API) ?  computedKey : computedKey.substring(0, MAX_KEY_SIZE_BB_API);
+    private void deletePullRequestComment(String pullRequestId, String commentId) {
+        delete(v2("/pullrequests/" + pullRequestId + "/comments/" + commentId));
     }
 
-    public String buildStatusKey(String bsKey) {
-        return this.computeAPIKey(bsKey);
-    }
-
-    public boolean hasBuildStatus(String owner, String repositoryName, String revision, String keyEx) {
-        String url = v2(owner, repositoryName, "/commit/" + revision + "/statuses/build/" + this.computeAPIKey(keyEx));
-        return get(url).contains("\"state\"");
-    }
-
-    public void setBuildStatus(String owner, String repositoryName, String revision, BuildState state, String buildUrl, String comment, String keyEx) {
-        String url = v2(owner, repositoryName, "/commit/" + revision + "/statuses/build");
-        String computedKey = this.computeAPIKey(keyEx);
-        NameValuePair[] data = new NameValuePair[]{
-                new NameValuePair("description", comment),
-                new NameValuePair("key", computedKey),
-                new NameValuePair("name", this.name),
-                new NameValuePair("state", state.toString()),
-                new NameValuePair("url", buildUrl),
-        };
-        logger.log(Level.FINE, "POST state {0} to {1} with key {2} with response {3}", new Object[]{
-                state, url, computedKey, post(url, data)}
-        );
-    }
-
-    public void deletePullRequestApproval(String pullRequestId) {
-        delete(v2("/pullrequests/" + pullRequestId + "/approve"));
-    }
-
-    public void deletePullRequestComment(String pullRequestId, String commentId) {
-        delete(v1("/pullrequests/" + pullRequestId + "/comments/" + commentId));
-    }
-
-    public void updatePullRequestComment(String pullRequestId, String content, String commentId) {
-        NameValuePair[] data = new NameValuePair[] {
-                new NameValuePair("content", content),
-        };
-        put(v1("/pullrequests/" + pullRequestId + "/comments/" + commentId), data);
-    }
-
-    public Pullrequest.Participant postPullRequestApproval(String pullRequestId) {
-        try {
-            return parse(post(v2("/pullrequests/" + pullRequestId + "/approve"),
-                    new NameValuePair[]{}), Pullrequest.Participant.class);
-        } catch (IOException e) {
-            logger.log(Level.WARNING, "Invalid pull request approval response.", e);
-        }
-        return null;
-    }
-
-    String getLoggedInUserUUID() {
+    private String getLoggedInUserUUID() {
         try {
             String response = get(V2_API_URL + "/user");
             logger.log(Level.FINE, "getLoggedInUserUUIDResponse: " + response);
-            return parse(response, Pullrequest.Author.class).getUuid();
+            return parse(response, CloudPullrequest.Author.class).getUuid();
         } catch (IOException e) {
             logger.log(Level.WARNING, "Invalid user info response.", e);
         }
@@ -219,29 +139,28 @@ public class ApiClient {
         return StringUtils.EMPTY;
     }
 
-    public Pullrequest.Comment postPullRequestComment(String pullRequestId, String content) {
-        NameValuePair[] data = new NameValuePair[] {
-                new NameValuePair("content", content),
-        };
+    public CloudPullrequest.Comment postPullRequestComment(String pullRequestId, String content) {
+        CloudPullrequest.Comment data = new CloudPullrequest.Comment(content);
         try {
-            String response = post(v1("/pullrequests/" + pullRequestId + "/comments"), data);
-            logger.log(Level.FINE, "postPullRequestCommentResponse: " + response);
-            return parse(response, new TypeReference<Pullrequest.Comment>() {});
-        } catch(Exception e) {
+            String response = post(v2("/pullrequests/" + pullRequestId + "/comments"), data);
+            logger.log(Level.FINE, "postCommentResponse: " + response);
+            return parse(response, new TypeReference<CloudPullrequest.Comment>() {
+            });
+        } catch (Exception e) {
             logger.log(Level.WARNING, "Invalid pull request comment response.", e);
         }
         return null;
     }
 
     private <T> List<T> getAllValues(String rootUrl, int pageLen, Class<T> cls) {
-        List<T> values = new ArrayList<T>();
+        List<T> values = new ArrayList<>();
         try {
             String url = rootUrl + "?pagelen=" + pageLen;
             do {
-                final JavaType type = TypeFactory.defaultInstance().constructParametricType(Pullrequest.Response.class, cls);
-                String rs = get(url);
-                logger.log(Level.FINE, "getAllValuesResponse: " + rs);
-                Pullrequest.Response<T> response = parse(rs, type);
+                final JavaType type = TypeFactory.defaultInstance().constructParametricType(AbstractPullrequest.Response.class, cls);
+                final String body = get(url);
+                logger.log(Level.FINE, "****Received****:\n" + body + "\n");
+                AbstractPullrequest.Response<T> response = parse(body, type);
                 values.addAll(response.getValues());
                 url = response.getNext();
             } while (url != null);
@@ -253,10 +172,6 @@ public class ApiClient {
 
     private HttpClient getHttpClient() {
         return this.factory.getInstanceHttpClient();
-    }
-
-    private String v1(String url) {
-        return V1_API_BASE_URL + this.owner + "/" + this.repositoryName + url;
     }
 
     private String v2(String path) {
@@ -271,22 +186,29 @@ public class ApiClient {
         return send(new GetMethod(path));
     }
 
-    private String post(String path, NameValuePair[] data) {
-        PostMethod req = new PostMethod(path);
-        req.setRequestBody(data);
-        req.getParams().setContentCharset("utf-8");
-        return send(req);
+    private String post(String path, Object data) {
+        try {
+            final String jsonStr = ApiClient.serializeObject(data);
+            final StringRequestEntity entity = new StringRequestEntity(jsonStr, "application/json", "utf-8");
+            PostMethod req = new PostMethod(path);
+            req.setRequestEntity(entity);
+            logger.log(Level.FINE, "SENDING:\n" + jsonStr + "\n");
+            return send(req);
+        } catch (IOException e) {
+            logger.log(Level.WARNING, "Not able to parse data to json", e);
+        }
+        return null;
+    }
+
+    // Public static JSON serializer, so we can test serialization
+    public static String serializeObject(Object obj) throws java.io.IOException {
+        return new ObjectMapper().
+                setSerializationInclusion(JsonSerialize.Inclusion.NON_NULL).
+                writeValueAsString(obj);
     }
 
     private void delete(String path) {
         send(new DeleteMethod(path));
-    }
-
-    private void put(String path, NameValuePair[] data) {
-        PutMethod req = new PutMethod(path);
-        req.setRequestBody(EncodingUtil.formUrlEncode(data, "utf-8"));
-        req.getParams().setContentCharset("utf-8");
-        send(req);
     }
 
     private String send(HttpMethodBase req) {
@@ -296,8 +218,6 @@ public class ApiClient {
         try {
             client.executeMethod(req);
             return req.getResponseBodyAsString();
-        } catch (HttpException e) {
-            logger.log(Level.WARNING, "Failed to send request.", e);
         } catch (IOException e) {
             logger.log(Level.WARNING, "Failed to send request.", e);
         } finally {
@@ -309,9 +229,11 @@ public class ApiClient {
     private <R> R parse(String response, Class<R> cls) throws IOException {
         return new ObjectMapper().readValue(response, cls);
     }
+
     private <R> R parse(String response, JavaType type) throws IOException {
         return new ObjectMapper().readValue(response, type);
     }
+
     private <R> R parse(String response, TypeReference<R> ref) throws IOException {
         return new ObjectMapper().readValue(response, ref);
     }

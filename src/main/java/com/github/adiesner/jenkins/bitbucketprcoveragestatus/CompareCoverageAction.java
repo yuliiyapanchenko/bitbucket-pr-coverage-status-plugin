@@ -23,7 +23,7 @@ import com.cloudbees.plugins.credentials.common.StandardUsernameListBoxModel;
 import com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials;
 import com.cloudbees.plugins.credentials.domains.URIRequirementBuilder;
 import com.github.adiesner.jenkins.bitbucketprcoveragestatus.bitbucket.ApiClient;
-import com.github.adiesner.jenkins.bitbucketprcoveragestatus.bitbucket.Pullrequest;
+import com.github.adiesner.jenkins.bitbucketprcoveragestatus.bitbucket.CloudPullrequest;
 import hudson.EnvVars;
 import hudson.Extension;
 import hudson.FilePath;
@@ -57,7 +57,6 @@ import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest;
 
 import javax.annotation.Nonnull;
-import javax.servlet.ServletException;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
@@ -162,11 +161,11 @@ public class CompareCoverageAction extends Recorder implements SimpleBuildStep {
     }
 
     public String getUsername() {
-        return this.getCredentials(getBitbucketHost(), getCredentialsId()).getUsername();
+        return getCredentials(getBitbucketHost(), getCredentialsId()).getUsername();
     }
 
     public String getPassword() {
-        return this.getCredentials(getBitbucketHost(), getCredentialsId()).getPassword().getPlainText();
+        return getCredentials(getBitbucketHost(), getCredentialsId()).getPassword().getPlainText();
     }
 
     // TODO why is this needed for no public field ‘scmVars’ (or getter method) found in class ....
@@ -283,14 +282,14 @@ public class CompareCoverageAction extends Recorder implements SimpleBuildStep {
                 @QueryParameter("credentialsId") final String credentialsId,
                 @QueryParameter("projectCode") final String projectCode,
                 @QueryParameter("repositoryName") final String repositoryName
-        ) throws IOException, ServletException {
+        ) {
 
             ApiClient client = getBitbucketApiClient(bitbucketHost, credentialsId, projectCode, repositoryName);
 
-            final List<Pullrequest> pullRequests = client.getPullRequests();
+            final List<CloudPullrequest> pullRequests = client.getPullRequests();
 
             StringBuilder projectList = new StringBuilder();
-            for (Pullrequest p : pullRequests) {
+            for (CloudPullrequest p : pullRequests) {
                 projectList.append(p.getTitle()).append(" ");
             }
 

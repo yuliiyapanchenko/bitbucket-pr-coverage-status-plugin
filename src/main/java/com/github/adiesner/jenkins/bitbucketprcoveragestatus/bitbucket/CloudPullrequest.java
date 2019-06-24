@@ -1,10 +1,8 @@
 package com.github.adiesner.jenkins.bitbucketprcoveragestatus.bitbucket;
 
+import org.codehaus.jackson.annotate.JsonIgnore;
 import org.codehaus.jackson.annotate.JsonIgnoreProperties;
 import org.codehaus.jackson.annotate.JsonProperty;
-
-import java.util.List;
-import java.util.Map;
 
 /**
  * POJOs representing the pull-requests extracted from the
@@ -14,7 +12,7 @@ import java.util.Map;
  */
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class Pullrequest {
+public class CloudPullrequest extends AbstractPullrequest {
 
     private String     description;
     private Boolean    closeSourceBranch;
@@ -31,50 +29,7 @@ public class Pullrequest {
     private Author     author;
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Response<T> {
-        private int pageLength;
-        private List<T> values;
-        private int page;
-        private int size;
-        private String next;
-
-        @JsonProperty("pagelen")
-        public int getPageLength() {
-            return pageLength;
-        }
-        @JsonProperty("pagelen")
-        public void setPageLength(int pageLength) {
-            this.pageLength = pageLength;
-        }
-        public List<T> getValues() {
-            return values;
-        }
-        public void setValues(List<T> values) {
-            this.values = values;
-        }
-        public int getPage() {
-            return page;
-        }
-        public void setPage(int page) {
-            this.page = page;
-        }
-        public int getSize() {
-            return size;
-        }
-        public void setSize(int size) {
-            this.size = size;
-        }
-        public String getNext() {
-            return next;
-        }
-        public void setNext(String next) {
-            this.next = next;
-        }
-    }
-
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Revision {
+    public static class Revision implements AbstractPullrequest.Revision {
         private Repository repository;
         private Branch branch;
         private Commit commit;
@@ -100,7 +55,7 @@ public class Pullrequest {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Repository {
+    public static class Repository implements AbstractPullrequest.Repository {
         private String fullName;
         private String name;
         private String ownerName;
@@ -134,7 +89,7 @@ public class Pullrequest {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Branch {
+    public static class Branch implements AbstractPullrequest.Branch {
         private String name;
 
         public String getName() {
@@ -147,7 +102,7 @@ public class Pullrequest {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Commit {
+    public static class Commit implements AbstractPullrequest.Commit {
         private String hash;
 
         public String getHash() {
@@ -161,7 +116,7 @@ public class Pullrequest {
 
     // Was: Approval
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Participant {
+    public static class Participant implements AbstractPullrequest.Participant {
         private String role;
         private Boolean approved;
 
@@ -179,13 +134,58 @@ public class Pullrequest {
         }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Author implements AbstractPullrequest.Author {
+        private String username;
+        private String display_name;
+        private String uuid;
+
+        @JsonProperty("uuid")
+        public String getUuid() {
+            return uuid;
+        }
+
+        @JsonProperty("uuid")
+        public void setUuid(String uuid) {
+            this.uuid = uuid;
+        }
+
+        public String getUsername() {
+            return username;
+        }
+        public void setUsername(String username) {
+            this.username = username;
+        }
+
+        @JsonProperty("display_name")
+        public String getDisplayName() {
+            return display_name;
+        }
+
+        @JsonProperty("display_name")
+        public void setDisplayName(String display_name) {
+            this.display_name = display_name;
+        }
+        public String getCombinedUsername() {
+            return String.format(AUTHOR_COMBINED_NAME, this.getDisplayName(), this.getUsername());
+        }
+    }
+
     // https://confluence.atlassian.com/bitbucket/pullrequests-resource-1-0-296095210.html#pullrequestsResource1.0-POSTanewcomment
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Comment implements Comparable<Comment> {
+    public static class Comment implements AbstractPullrequest.Comment {
         private Integer id;
         private Inline  inline;
-        private String  content;
+        private Content content;
         private Author author;
+
+        public Comment() {
+        }
+
+        public Comment(String rawContent) {
+            this.content = new Content();
+            this.content.setRaw(rawContent);
+        }
 
         @JsonProperty("user")
         public Author getAuthor() {
@@ -197,8 +197,31 @@ public class Pullrequest {
             this.author = author;
         }
 
+        @JsonProperty("inline")
+        public Inline getInline() {
+            return inline;
+        }
+
+        @JsonProperty("inline")
+        public void setInline(Inline inline) {
+            this.inline = inline;
+        }
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class Content {
+            private String raw;
+
+            public String getRaw() {
+                return raw;
+            }
+
+            public void setRaw(String rawContent) {
+                this.raw = rawContent;
+            }
+        }
+
         @Override
-        public int compareTo(Comment target) {
+        public int compareTo(AbstractPullrequest.Comment target) {
             if (target == null){
                 return -1;
             } else if (this.getId() > target.getId()) {
@@ -233,82 +256,44 @@ public class Pullrequest {
             this.id = id;
         }
 
-        @JsonProperty("inline")
-        public Inline getInline() {
-            return inline;
-        }
-
-        @JsonProperty("inline")
-        public void setInline(Inline inline) {
-            this.inline = inline;
-        }
-
+        // This annotation prevents getContent() - the abstract method, from being used in json
+        // serialization/deserialization
+        @JsonIgnore
         public String getContent() {
+            if (content == null) {
+                return "";
+            }
+            return content.getRaw();
+        }
+
+        // This annotation is needed so that the serializer will use the actual content
+        // for serialization, even though the abstract class assumes getContent() will return a string.
+        @JsonProperty("content")
+        public Content getContentRaw() {
             return content;
         }
 
-        public void setContent(Object content) {
-            if (content instanceof String) {
-                this.content = (String)content;
-            } else if (content instanceof Map){
-                this.content = (String)((Map)content).get("raw");
+        // And, since the getContent didn't get grabbed by default due to my @JsonIgnore, we need to 
+        // tell it setContent is still ok to use.
+        @JsonProperty("content")
+        public void setContent(Content content) {
+            this.content = content;
+        }
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class Inline {
+            private String path;
+
+            @JsonProperty("path")
+            public String getPath() {
+                return path;
             }
-            return;
+
+            @JsonProperty("path")
+            public void setPath(String path) {
+                this.path = path;
+            }
         }
-
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Inline {
-        private String path;
-
-        @JsonProperty("path")
-        public String getPath() {
-            return path;
-        }
-
-        @JsonProperty("path")
-        public void setPath(String path) {
-            this.path = path;
-        }
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Author {
-      private String username;
-      private String display_name;
-      private String uuid;
-      public static final String COMBINED_NAME = "%s <@%s>";
-
-      @JsonProperty("uuid")
-        public String getUuid() {
-            return uuid;
-        }
-
-        @JsonProperty("uuid")
-        public void setUuid(String uuid) {
-            this.uuid = uuid;
-        }
-
-        public String getUsername() {
-          return username;
-      }
-      public void setUsername(String username) {
-          this.username = username;
-      }
-      
-      @JsonProperty("display_name")
-      public String getDisplayName() {
-          return display_name;
-      }
-      
-      @JsonProperty("display_name")
-      public void setDisplayName(String display_name) {
-          this.display_name = display_name;
-      }
-      public String getCombinedUsername() {
-        return String.format(COMBINED_NAME, this.getDisplayName(), this.getUsername());
-      }
     }
 
     //-------------------- only getters and setters follow -----------------
@@ -418,13 +403,13 @@ public class Pullrequest {
     public void setId(String id) {
         this.id = id;
     }
-    
+
     public Author getAuthor() {
-      return this.author;
+        return this.author;
     }
-    
-    public void setAutohor(Author author) {
-      this.author = author;
+
+    public void setAuthor(Author author) {
+        this.author = author;
     }
 
 }
